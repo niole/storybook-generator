@@ -3,7 +3,7 @@ import { createSourceFile, ScriptTarget, SourceFile } from 'typescript/lib/types
 
 import { findTypeDeclarations } from '../parser';
 
-test('string union test', t => {
+test('integer union test', t => {
     t.plan(6);
 
     const stringUnion = `type Name = 1 | 2 | 3;`;
