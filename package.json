@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "prod-test": "ts-node node_modules/tape/bin/tape test/unionTypes.test.ts",
-    "test": "tsc parser.ts && ts-node node_modules/tape/bin/tape test/unionTypes.test.ts",
-    "test1": "tsc parser.ts && ts-node node_modules/tape/bin/tape",
+    "test": "tsc parser.ts && ts-node node_modules/tape/bin/tape test/**/*.test.ts",
+    "test1": "tsc parser.ts && ts-node node_modules/tape/bin/tape **/*/$NAME.test.ts",
     "start": "tsc parser.ts && node parser.js"
   },
   "author": "",
