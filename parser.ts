@@ -1,4 +1,4 @@
-import { createSourceFile, Node, ScriptTarget, SyntaxKind, isTypeAliasDeclaration, isIdentifier, isUnionTypeNode, isLiteralTypeNode, isStringLiteral, isNumericLiteral, isBigIntLiteral, SourceFile, isTypeNode } from 'typescript/lib/typescript';
+import { PropertySignature, createSourceFile, Node, ScriptTarget, SyntaxKind, isTypeAliasDeclaration, isIdentifier, isUnionTypeNode, isLiteralTypeNode, isStringLiteral, isNumericLiteral, isBigIntLiteral, SourceFile, isTypeNode, isTypeLiteralNode, isPropertySignature, LiteralType, isWhiteSpaceLike, tokenToString, isToken, Token, LiteralExpression, LiteralTypeNode, isArrayLiteralExpression, isObjectLiteralExpression, Identifier } from 'typescript/lib/typescript';
 
 /**
  * looking out for things like the following
@@ -64,7 +64,10 @@ function getUnionType(declarationSpec: TypeDeclarationSpec, sourceFile?: SourceF
 		let unionGeneratorLiterals = [];
 		node.forEachChild((unionLiteral: Node) => {
 			if (isLiteralTypeNode(unionLiteral)) {
-				const literals = getLiteralTypes(node)
+				const literals = getStringsOrNumbers(node)
+				unionGeneratorLiterals = unionGeneratorLiterals.concat(literals);
+			} else if (isTypeLiteralNode(unionLiteral)) {
+				const literals = getObjectsOrArrays(node)
 				unionGeneratorLiterals = unionGeneratorLiterals.concat(literals);
 			}
 		});
@@ -76,20 +79,69 @@ function getUnionType(declarationSpec: TypeDeclarationSpec, sourceFile?: SourceF
 	return;
 }
 
-function getLiteralTypes(node: Node): any[] {
+function getObjectsOrArrays(node: Node): any[] {
 	let literals: any[] = [];
 	node.forEachChild((child: Node) => {
-		if (isLiteralTypeNode(child)) {
+		if (isTypeLiteralNode(child)) {
+			let o = {};
 			child.forEachChild((literalChild: Node) => {
-				if (isStringLiteral(literalChild)) {
-					literals.push(literalChild.text);
-				} else if (isNumericLiteral(literalChild)) {
-					literals.push(parseFloat(literalChild.text));
+				if (isPropertySignature(literalChild)) {
+					// it's an object
+					const literal = getObjectLiteral(literalChild);
+					if (literal !== undefined) {
+						o = {...o, ...literal};
+					}
 				}
 			});
+			literals.push(o);
 		}
 	});
 	return literals;
+}
+
+function getObjectLiteral(node: PropertySignature): object {
+	const o = {};
+	let inProgressKey;
+	node.forEachChild((child: Identifier | LiteralTypeNode) => {
+			if (isIdentifier(child)) {
+				inProgressKey = child.text;
+			} else if (isLiteralTypeNode(child)) {
+				visitLiteralTypeNodeChildren(child, (literalChild: LiteralExpression) => {
+					const literal = getNumberOrString(literalChild);
+					if (literal !== undefined && inProgressKey !== undefined) {
+						o[inProgressKey] = literal;
+						inProgressKey = undefined;
+					}
+				});
+			}
+	});
+	return o;
+}
+
+function getNumberOrString(literalChild: LiteralExpression): number | string | undefined {
+	if (isNumericLiteral(literalChild)) {
+		return parseFloat(literalChild.text);
+	}
+	return literalChild.text;
+}
+
+function getStringsOrNumbers(node: Node): any[] {
+	let literals: any[] = [];
+	node.forEachChild((child: LiteralTypeNode) => {
+		visitLiteralTypeNodeChildren(child, (literalChild: LiteralExpression) => {
+			const literal = getNumberOrString(literalChild);
+			if (literal !== undefined) {
+				literals.push(literal);
+			}
+		})
+	});
+	return literals;
+}
+
+function visitLiteralTypeNodeChildren(node: LiteralTypeNode, cb: (child: LiteralExpression) => void): void {
+	if (isLiteralTypeNode(node)) {
+		node.forEachChild(cb);
+	}
 }
 
 type TypeDeclarationSpec = { identifier?: string; declaration: Node };
@@ -114,6 +166,18 @@ function getOptionalIdentifierAndTypeDeclaration(node: Node, sourceFile?: Source
 	return;
 }
 
+function getTypeDeclaration(declarationSpec: TypeDeclarationSpec): Generator | undefined {
+	return getUnionType(declarationSpec);
+}
+
+function getUnionTypeGetter(literals: any[]): () => any {
+	let totalCalls = -1;
+	return () => {
+		totalCalls += 1;
+		return literals[totalCalls % literals.length];
+	};
+}
+
 export function findTypeDeclarations(node: Node): Generator[] {
 	let generators: Generator[] = [];
 	node.forEachChild((child: Node) => {
@@ -131,16 +195,4 @@ export function findTypeDeclarations(node: Node): Generator[] {
 		}
 	});
 	return generators;
-}
-
-function getTypeDeclaration(declarationSpec: TypeDeclarationSpec): Generator | undefined {
-	return getUnionType(declarationSpec);
-}
-
-function getUnionTypeGetter(literals: any[]): () => any {
-	let totalCalls = -1;
-	return () => {
-		totalCalls += 1;
-		return literals[totalCalls % literals.length];
-	};
 }
