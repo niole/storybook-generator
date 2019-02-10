@@ -1,0 +1,23 @@
+{
+  "name": "generatestorybook",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "prod-test": "ts-node node_modules/tape/bin/tape test/unionTypes.test.ts",
+    "test": "tsc parser.ts && ts-node node_modules/tape/bin/tape test/unionTypes.test.ts",
+    "start": "tsc parser.ts && node parser.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "react": "^16.8.1",
+    "ts-node": "^8.0.2",
+    "typescript": "^3.3.3"
+  },
+  "devDependencies": {
+    "@types/react": "^16.8.2",
+    "@types/tape": "^4.2.33",
+    "tape": "^4.10.0"
+  }
+}
