@@ -120,13 +120,11 @@ export function findTypeDeclarations(node: Node): Generator[] {
 		if (node.kind !== SyntaxKind.EndOfFileToken) {
 			const typeDecSpec = getOptionalIdentifierAndTypeDeclaration(child);
 			if (typeDecSpec) {
-				console.log('is type dec', child.kind);
 				const typeDeclaration = getTypeDeclaration(typeDecSpec);
 				if (typeDeclaration) {
 					generators.push(typeDeclaration);
 				}
 			} else if (child.kind !== SyntaxKind.EndOfFileToken) {
-				console.log('more types', child.kind);
 				const possibleGenerators = findTypeDeclarations(child);
 				generators = generators.concat(generators);
 			}
