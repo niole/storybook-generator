@@ -85,74 +85,95 @@ function getUnionType(declarationSpec: TypeDeclarationSpec, sourceFile?: SourceF
 function getUnionedArrays(node: Node): any[][] {
 	let literals: any[] = [];
 	node.forEachChild((child: TupleTypeNode) => {
-		const a = [];
-		child.forEachChild((literalChild: LiteralTypeNode) => {
-			if (isLiteralTypeNode(literalChild)) {
-				visitLiteralTypeNodeChildren(literalChild, (expr: LiteralExpression) => {
-					const literal = getNumberOrString(expr);
-					if (literal !== undefined) {
-						a.push(literal);
-					}
-				});
-			}
-		});
-		literals.push(a);
+		const a = getArrayLiteral(child);
+		if (a !== undefined) {
+			literals.push(a);
+		}
 	});
 	return literals;
+}
+
+function getArrayLiteral(node: Node): any[] | undefined {
+	let a;
+	if (isTupleTypeNode(node)) {
+		node.forEachChild((literalChild: LiteralTypeNode) => {
+			if (isLiteralTypeNode(literalChild)) {
+				const literal = getNumberOrString(literalChild);
+				if (literal !== undefined) {
+					if (a === undefined) {
+						a = [];
+					}
+					a.push(literal);
+				}
+			}
+		});
+	}
+	return a;
 }
 
 function getUnionedObjects(node: Node): object[] {
 	let literals: any[] = [];
 	node.forEachChild((child: TypeLiteralNode) => {
-		let o = {};
-		child.forEachChild((literalChild: Node) => {
-			if (isPropertySignature(literalChild)) {
-				const literal = getObjectLiteral(literalChild);
-				if (literal !== undefined) {
-					o = {...o, ...literal};
-				}
-			}
-		});
-		literals.push(o);
+		const o = getObjectLiteral(child);
+		if (o !== undefined) {
+			literals.push(o);
+		}
 	});
 	return literals;
 }
 
-function getObjectLiteral(node: PropertySignature): object {
-	const o = {};
-	let inProgressKey;
-	node.forEachChild((child: Identifier | LiteralTypeNode) => {
-			if (isIdentifier(child)) {
-				inProgressKey = child.text;
-			} else if (isLiteralTypeNode(child)) {
-				visitLiteralTypeNodeChildren(child, (literalChild: LiteralExpression) => {
-					const literal = getNumberOrString(literalChild);
-					if (literal !== undefined && inProgressKey !== undefined) {
-						o[inProgressKey] = literal;
-						inProgressKey = undefined;
-					}
-				});
+function getObjectLiteral(node: TypeLiteralNode): object | undefined {
+	let o;
+	node.forEachChild((literalChild: Node) => {
+		if (isPropertySignature(literalChild)) {
+			const literal = getObjectSubLiteral(literalChild);
+			if (literal !== undefined) {
+				if (o === undefined) {
+					o = {};
+				}
+				o = {...o, ...literal};
 			}
+		}
 	});
 	return o;
 }
 
-function getNumberOrString(literalChild: LiteralLikeNode): number | string | undefined {
-	if (isNumericLiteral(literalChild)) {
-		return parseFloat(literalChild.text);
-	}
-	return literalChild.text;
+function getObjectSubLiteral(node: PropertySignature): object {
+	const o = {};
+	let inProgressKey;
+	node.forEachChild((child: Identifier | LiteralTypeNode) => {
+		if (isIdentifier(child)) {
+			inProgressKey = child.text;
+		} else {
+			const literal = getTypeLiteralType(child);
+			if (literal !== undefined && inProgressKey !== undefined) {
+				o[inProgressKey] = literal;
+				inProgressKey = undefined;
+			}
+		}
+	});
+	return o;
+}
+
+function getNumberOrString(node: LiteralTypeNode): number | string | undefined {
+	let literal;
+	visitLiteralTypeNodeChildren(node, (literalChild: LiteralExpression) => {
+		if (isNumericLiteral(literalChild)) {
+			literal = parseFloat(literalChild.text);
+		} else {
+			literal = literalChild.text;
+		}
+	});
+	return literal;
 }
 
 function getStringsOrNumbers(node: Node): any[] {
 	let literals: any[] = [];
 	node.forEachChild((child: LiteralTypeNode) => {
-		visitLiteralTypeNodeChildren(child, (literalChild: LiteralExpression) => {
-			const literal = getNumberOrString(literalChild);
-			if (literal !== undefined) {
-				literals.push(literal);
-			}
-		})
+		const literal = getNumberOrString(child);
+		if (literal !== undefined) {
+			literals.push(literal);
+		}
 	});
 	return literals;
 }
@@ -165,6 +186,7 @@ function visitLiteralTypeNodeChildren(node: LiteralTypeNode, cb: (child: Literal
 
 type TypeDeclarationSpec = { identifier?: string; declaration: Node };
 function getOptionalIdentifierAndTypeDeclaration(node: Node, sourceFile?: SourceFile): TypeDeclarationSpec | undefined {
+	// TODO expand to work for interface, enum
 	let identifier: string | undefined = undefined;
 	let declaration: Node | undefined = undefined;
 	node.forEachChild((child: Node) => {
@@ -185,8 +207,55 @@ function getOptionalIdentifierAndTypeDeclaration(node: Node, sourceFile?: Source
 	return;
 }
 
+function getTypeLiteralType(node: Node): any | undefined {
+	if (isTypeLiteralNode(node)) {
+		const o = getObjectLiteral(node);
+		if (o !== undefined) {
+			return o;
+		}
+	}
+
+	if (isTupleTypeNode(node)) {
+		const a = getArrayLiteral(node);
+		if (a !== undefined) {
+			return a;
+		}
+	}
+
+	if (isLiteralTypeNode(node)) {
+		// continue
+		const literal = getNumberOrString(node);
+		if (literal !== undefined) {
+			return literal;
+		}
+	}
+	return;
+}
+
+function getTypeLiteralTypeFromDeclarationSpec(declarationSpec: TypeDeclarationSpec): Generator | undefined {
+	const node = declarationSpec.declaration
+	const identifier = declarationSpec.identifier;
+	const literal = getTypeLiteralType(node);
+	if (literal !== undefined) {
+		return {
+			identifier,
+			get() {
+				return literal;
+			}
+		}
+	}
+	return;
+}
+
 function getTypeDeclaration(declarationSpec: TypeDeclarationSpec): Generator | undefined {
-	return getUnionType(declarationSpec);
+	const typeGetters = [getUnionType, getTypeLiteralTypeFromDeclarationSpec];
+	let typeIndex = 0;
+	let foundType;
+	while (foundType === undefined && typeIndex < typeGetters.length) {
+		foundType = typeGetters[typeIndex](declarationSpec);
+		typeIndex += 1;
+	}
+	return foundType;
 }
 
 function getUnionTypeGetter(literals: any[]): () => any {
