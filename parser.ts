@@ -97,14 +97,12 @@ function getArrayLiteral(node: Node): any[] | undefined {
 	let a;
 	if (isTupleTypeNode(node)) {
 		node.forEachChild((literalChild: LiteralTypeNode) => {
-			if (isLiteralTypeNode(literalChild)) {
-				const literal = getNumberOrString(literalChild);
-				if (literal !== undefined) {
-					if (a === undefined) {
-						a = [];
-					}
-					a.push(literal);
+			const literal = getTypeLiteralType(literalChild);
+			if (literal !== undefined) {
+				if (a === undefined) {
+					a = [];
 				}
+				a.push(literal);
 			}
 		});
 	}
