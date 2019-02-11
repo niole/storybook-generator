@@ -1,4 +1,5 @@
-import { PropertySignature, createSourceFile, Node, ScriptTarget, SyntaxKind, isTypeAliasDeclaration, isIdentifier, isUnionTypeNode, isLiteralTypeNode, isStringLiteral, isNumericLiteral, isBigIntLiteral, SourceFile, isTypeNode, isTypeLiteralNode, isPropertySignature, LiteralType, isWhiteSpaceLike, tokenToString, isToken, Token, LiteralExpression, LiteralTypeNode, isArrayLiteralExpression, isObjectLiteralExpression, Identifier, isTupleTypeNode, LiteralLikeNode, TupleTypeNode, TypeLiteralNode } from 'typescript/lib/typescript';
+import { PropertySignature, createSourceFile, Node, ScriptTarget, SyntaxKind, isIdentifier, isUnionTypeNode, isLiteralTypeNode, isNumericLiteral, isTypeNode, isTypeLiteralNode, isPropertySignature, LiteralExpression, LiteralTypeNode, Identifier, isTupleTypeNode, TupleTypeNode, TypeLiteralNode, KeywordTypeNode } from 'typescript/lib/typescript';
+import { getBooleanGenerator, getStringGenerator, getNumberGenerator } from './literalGenerator';
 
 /**
  * looking out for things like the following
@@ -57,21 +58,21 @@ type Generator = {
  * get to a type declaration
  * map type declaration into generators
  */
-function getUnionType(declarationSpec: TypeDeclarationSpec, sourceFile?: SourceFile): Generator | undefined {
+function getUnionType(declarationSpec: TypeDeclarationSpec, pathString: string): Generator | undefined {
 	const identifier = declarationSpec.identifier;
 	const node = declarationSpec.declaration
 	if (isUnionTypeNode(node)) {
-		let unionGeneratorLiterals = [];
+		let unionGeneratorLiterals: ObjectGeneratorHelper[];
 		node.forEachChild((unionLiteral: Node) => {
 			if (isLiteralTypeNode(unionLiteral)) {
 				const literals = getStringsOrNumbers(node)
-				unionGeneratorLiterals = unionGeneratorLiterals.concat(literals);
+				unionGeneratorLiterals = literals;
 			} else if (isTypeLiteralNode(unionLiteral)) {
-				const literals = getUnionedObjects(node)
-				unionGeneratorLiterals = unionGeneratorLiterals.concat(literals);
+				const literals = getUnionedObjects(node, pathString)
+				unionGeneratorLiterals = literals;
 			} else if (isTupleTypeNode(unionLiteral)) {
-				const literals = getUnionedArrays(node);
-				unionGeneratorLiterals = unionGeneratorLiterals.concat(literals);
+				const literals = getUnionedArrays(node, pathString);
+				unionGeneratorLiterals = literals;
 			}
 		});
 		return {
@@ -82,10 +83,10 @@ function getUnionType(declarationSpec: TypeDeclarationSpec, sourceFile?: SourceF
 	return;
 }
 
-function getUnionedArrays(node: Node): any[][] {
+function getUnionedArrays(node: Node, path: string): ObjectGeneratorHelper[] {
 	let literals: any[] = [];
 	node.forEachChild((child: TupleTypeNode) => {
-		const a = getArrayLiteral(child);
+		const a = getArrayLiteral(child, path);
 		if (a !== undefined) {
 			literals.push(a);
 		}
@@ -93,11 +94,12 @@ function getUnionedArrays(node: Node): any[][] {
 	return literals;
 }
 
-function getArrayLiteral(node: Node): any[] | undefined {
-	let a;
+function getArrayLiteral(node: Node, path: string): ObjectGeneratorHelper | undefined {
+	let a: ObjectGeneratorHelper[];
+	let result: ObjectGeneratorHelper;
 	if (isTupleTypeNode(node)) {
 		node.forEachChild((literalChild: LiteralTypeNode) => {
-			const literal = getTypeLiteralType(literalChild);
+			const literal = getTypeLiteralType(literalChild, path);
 			if (literal !== undefined) {
 				if (a === undefined) {
 					a = [];
@@ -106,13 +108,18 @@ function getArrayLiteral(node: Node): any[] | undefined {
 			}
 		});
 	}
-	return a;
+
+	if (a !== undefined) {
+		result = () => a.map(helper => helper());
+	}
+	return result;
 }
 
-function getUnionedObjects(node: Node): object[] {
+type ObjectGeneratorHelper = () => any;
+function getUnionedObjects(node: Node, pathString: string): ObjectGeneratorHelper[] {
 	let literals: any[] = [];
 	node.forEachChild((child: TypeLiteralNode) => {
-		const o = getObjectLiteral(child);
+		const o = getObjectLiteral(child, pathString);
 		if (o !== undefined) {
 			literals.push(o);
 		}
@@ -120,60 +127,115 @@ function getUnionedObjects(node: Node): object[] {
 	return literals;
 }
 
-function getObjectLiteral(node: TypeLiteralNode): object | undefined {
-	let o;
+function getObjectLiteral(node: TypeLiteralNode, pathString: string): ObjectGeneratorHelper | undefined {
+	let helpers: ObjectGeneratorHelper[];
+	let o: ObjectGeneratorHelper
 	node.forEachChild((literalChild: Node) => {
 		if (isPropertySignature(literalChild)) {
-			const literal = getObjectSubLiteral(literalChild);
+			const literal = getObjectSubLiteral(literalChild, pathString);
 			if (literal !== undefined) {
-				if (o === undefined) {
-					o = {};
+				if (helpers === undefined) {
+					helpers = [];
 				}
-				o = {...o, ...literal};
+				helpers.push(literal);
 			}
 		}
 	});
+	if (helpers) {
+		o = () => {
+			return helpers.reduce((acc: object, nextHelper: ObjectGeneratorHelper) => ({
+				...acc,
+				...nextHelper()
+			}), {});
+		};
+	}
 	return o;
 }
 
-function getObjectSubLiteral(node: PropertySignature): object {
-	const o = {};
+function getObjectSubLiteral(node: PropertySignature, pathString: string): ObjectGeneratorHelper {
+	let o: ObjectGeneratorHelper;
 	let inProgressKey;
-	node.forEachChild((child: Identifier | LiteralTypeNode) => {
+	node.forEachChild((child: Identifier | LiteralTypeNode | KeywordTypeNode) => {
 		if (isIdentifier(child)) {
 			inProgressKey = child.text;
 		} else {
-			const literal = getTypeLiteralType(child);
-			if (literal !== undefined && inProgressKey !== undefined) {
-				o[inProgressKey] = literal;
-				inProgressKey = undefined;
+			if (inProgressKey !== undefined) {
+				const literal = getTypeLiteralType(child, pathString + inProgressKey);
+				if (literal !== undefined) {
+					o = () => {
+						return {
+							[inProgressKey]:  literal(),
+						};
+					};
+				} else if (!isLiteralTypeNode(child)) {
+					// sub type is a key word
+					const generator = getKeywordGeneratorHelper(child, pathString + inProgressKey)
+					if (generator !== undefined) {
+						o = () => ({
+							[inProgressKey]: generator(),
+						});
+					}
+				}
 			}
 		}
 	});
 	return o;
 }
 
-function getNumberOrString(node: LiteralTypeNode): number | string | undefined {
-	let literal;
+type KeywordGeneratorHelper = () => any;
+function getKeywordGeneratorHelper(node: KeywordTypeNode, pathString: string): KeywordGeneratorHelper | undefined {
+	if (node.kind === SyntaxKind.StringKeyword) {
+		return getStringGenerator(pathString);
+	}
+
+	if (node.kind === SyntaxKind.NumberKeyword) {
+		return getNumberGenerator(pathString);
+	}
+
+	if (node.kind === SyntaxKind.BooleanKeyword) {
+		return getBooleanGenerator();
+	}
+
+	if (node.kind === SyntaxKind.ObjectKeyword) {
+		return () => ({});
+	}
+
+	if (node.kind === SyntaxKind.UndefinedKeyword) {
+		return () => undefined;
+	}
+
+	if (node.kind === SyntaxKind.NullKeyword) {
+		return () => null;
+	}
+
+	if (node.kind === SyntaxKind.AnyKeyword) {
+		return () => undefined;
+	}
+
+	return;
+}
+
+function getNumberOrString(node: LiteralTypeNode): ObjectGeneratorHelper | undefined {
+	let literal: ObjectGeneratorHelper;
 	visitLiteralTypeNodeChildren(node, (literalChild: LiteralExpression) => {
 		if (isNumericLiteral(literalChild)) {
-			literal = parseFloat(literalChild.text);
+			literal = () => parseFloat(literalChild.text);
 		} else {
-			literal = literalChild.text;
+			literal = () => literalChild.text;
 		}
 	});
 	return literal;
 }
 
-function getStringsOrNumbers(node: Node): any[] {
-	let literals: any[] = [];
+function getStringsOrNumbers(node: Node): ObjectGeneratorHelper[] {
+	let literals: ObjectGeneratorHelper[] = [];
 	node.forEachChild((child: LiteralTypeNode) => {
 		const literal = getNumberOrString(child);
 		if (literal !== undefined) {
 			literals.push(literal);
 		}
 	});
-	return literals;
+	return literals
 }
 
 function visitLiteralTypeNodeChildren(node: LiteralTypeNode, cb: (child: LiteralExpression) => void): void {
@@ -183,7 +245,7 @@ function visitLiteralTypeNodeChildren(node: LiteralTypeNode, cb: (child: Literal
 }
 
 type TypeDeclarationSpec = { identifier?: string; declaration: Node };
-function getOptionalIdentifierAndTypeDeclaration(node: Node, sourceFile?: SourceFile): TypeDeclarationSpec | undefined {
+function getOptionalIdentifierAndTypeDeclaration(node: Node): TypeDeclarationSpec | undefined {
 	// TODO expand to work for interface, enum
 	let identifier: string | undefined = undefined;
 	let declaration: Node | undefined = undefined;
@@ -205,16 +267,16 @@ function getOptionalIdentifierAndTypeDeclaration(node: Node, sourceFile?: Source
 	return;
 }
 
-function getTypeLiteralType(node: Node): any | undefined {
+function getTypeLiteralType(node: Node, pathString: string): ObjectGeneratorHelper | undefined {
 	if (isTypeLiteralNode(node)) {
-		const o = getObjectLiteral(node);
+		const o = getObjectLiteral(node, pathString);
 		if (o !== undefined) {
 			return o;
 		}
 	}
 
 	if (isTupleTypeNode(node)) {
-		const a = getArrayLiteral(node);
+		const a = getArrayLiteral(node, pathString);
 		if (a !== undefined) {
 			return a;
 		}
@@ -232,14 +294,12 @@ function getTypeLiteralType(node: Node): any | undefined {
 
 function getTypeLiteralTypeFromDeclarationSpec(declarationSpec: TypeDeclarationSpec): Generator | undefined {
 	const node = declarationSpec.declaration
-	const identifier = declarationSpec.identifier;
-	const literal = getTypeLiteralType(node);
+	const identifier = declarationSpec.identifier || '';
+	const literal = getTypeLiteralType(node, identifier);
 	if (literal !== undefined) {
 		return {
 			identifier,
-			get() {
-				return literal;
-			}
+			get: literal,
 		}
 	}
 	return;
@@ -250,17 +310,17 @@ function getTypeDeclaration(declarationSpec: TypeDeclarationSpec): Generator | u
 	let typeIndex = 0;
 	let foundType;
 	while (foundType === undefined && typeIndex < typeGetters.length) {
-		foundType = typeGetters[typeIndex](declarationSpec);
+		foundType = typeGetters[typeIndex](declarationSpec, declarationSpec.identifier);
 		typeIndex += 1;
 	}
 	return foundType;
 }
 
-function getUnionTypeGetter(literals: any[]): () => any {
+function getUnionTypeGetter(literals: ObjectGeneratorHelper[]): () => any {
 	let totalCalls = -1;
 	return () => {
 		totalCalls += 1;
-		return literals[totalCalls % literals.length];
+		return literals[totalCalls % literals.length]();
 	};
 }
 
@@ -276,7 +336,7 @@ export function findTypeDeclarations(node: Node): Generator[] {
 				}
 			} else if (child.kind !== SyntaxKind.EndOfFileToken) {
 				const possibleGenerators = findTypeDeclarations(child);
-				generators = generators.concat(generators);
+				generators = generators.concat(possibleGenerators);
 			}
 		}
 	});
