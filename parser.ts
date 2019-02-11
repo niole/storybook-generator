@@ -1,4 +1,4 @@
-import { PropertySignature, createSourceFile, Node, ScriptTarget, SyntaxKind, isTypeAliasDeclaration, isIdentifier, isUnionTypeNode, isLiteralTypeNode, isStringLiteral, isNumericLiteral, isBigIntLiteral, SourceFile, isTypeNode, isTypeLiteralNode, isPropertySignature, LiteralType, isWhiteSpaceLike, tokenToString, isToken, Token, LiteralExpression, LiteralTypeNode, isArrayLiteralExpression, isObjectLiteralExpression, Identifier } from 'typescript/lib/typescript';
+import { PropertySignature, createSourceFile, Node, ScriptTarget, SyntaxKind, isTypeAliasDeclaration, isIdentifier, isUnionTypeNode, isLiteralTypeNode, isStringLiteral, isNumericLiteral, isBigIntLiteral, SourceFile, isTypeNode, isTypeLiteralNode, isPropertySignature, LiteralType, isWhiteSpaceLike, tokenToString, isToken, Token, LiteralExpression, LiteralTypeNode, isArrayLiteralExpression, isObjectLiteralExpression, Identifier, isTupleTypeNode, LiteralLikeNode, TupleTypeNode, TypeLiteralNode } from 'typescript/lib/typescript';
 
 /**
  * looking out for things like the following
@@ -67,7 +67,10 @@ function getUnionType(declarationSpec: TypeDeclarationSpec, sourceFile?: SourceF
 				const literals = getStringsOrNumbers(node)
 				unionGeneratorLiterals = unionGeneratorLiterals.concat(literals);
 			} else if (isTypeLiteralNode(unionLiteral)) {
-				const literals = getObjectsOrArrays(node)
+				const literals = getUnionedObjects(node)
+				unionGeneratorLiterals = unionGeneratorLiterals.concat(literals);
+			} else if (isTupleTypeNode(unionLiteral)) {
+				const literals = getUnionedArrays(node);
 				unionGeneratorLiterals = unionGeneratorLiterals.concat(literals);
 			}
 		});
@@ -79,22 +82,38 @@ function getUnionType(declarationSpec: TypeDeclarationSpec, sourceFile?: SourceF
 	return;
 }
 
-function getObjectsOrArrays(node: Node): any[] {
+function getUnionedArrays(node: Node): any[][] {
 	let literals: any[] = [];
-	node.forEachChild((child: Node) => {
-		if (isTypeLiteralNode(child)) {
-			let o = {};
-			child.forEachChild((literalChild: Node) => {
-				if (isPropertySignature(literalChild)) {
-					// it's an object
-					const literal = getObjectLiteral(literalChild);
+	node.forEachChild((child: TupleTypeNode) => {
+		const a = [];
+		child.forEachChild((literalChild: LiteralTypeNode) => {
+			if (isLiteralTypeNode(literalChild)) {
+				visitLiteralTypeNodeChildren(literalChild, (expr: LiteralExpression) => {
+					const literal = getNumberOrString(expr);
 					if (literal !== undefined) {
-						o = {...o, ...literal};
+						a.push(literal);
 					}
+				});
+			}
+		});
+		literals.push(a);
+	});
+	return literals;
+}
+
+function getUnionedObjects(node: Node): object[] {
+	let literals: any[] = [];
+	node.forEachChild((child: TypeLiteralNode) => {
+		let o = {};
+		child.forEachChild((literalChild: Node) => {
+			if (isPropertySignature(literalChild)) {
+				const literal = getObjectLiteral(literalChild);
+				if (literal !== undefined) {
+					o = {...o, ...literal};
 				}
-			});
-			literals.push(o);
-		}
+			}
+		});
+		literals.push(o);
 	});
 	return literals;
 }
@@ -118,7 +137,7 @@ function getObjectLiteral(node: PropertySignature): object {
 	return o;
 }
 
-function getNumberOrString(literalChild: LiteralExpression): number | string | undefined {
+function getNumberOrString(literalChild: LiteralLikeNode): number | string | undefined {
 	if (isNumericLiteral(literalChild)) {
 		return parseFloat(literalChild.text);
 	}
