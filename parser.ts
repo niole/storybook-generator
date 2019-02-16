@@ -1,5 +1,13 @@
-import { PropertySignature, createSourceFile, Node, ScriptTarget, SyntaxKind, isIdentifier, isUnionTypeNode, isLiteralTypeNode, isNumericLiteral, isTypeNode, isTypeLiteralNode, isPropertySignature, LiteralExpression, LiteralTypeNode, Identifier, isTupleTypeNode, TupleTypeNode, TypeLiteralNode, KeywordTypeNode } from 'typescript/lib/typescript';
-import { getBooleanGenerator, getStringGenerator, getNumberGenerator } from './literalGenerator';
+import { PropertySignature, createSourceFile, Node, ScriptTarget, SyntaxKind, isIdentifier, isUnionTypeNode, isLiteralTypeNode, isNumericLiteral, isTypeNode, isTypeLiteralNode, isPropertySignature, LiteralExpression, LiteralTypeNode, Identifier, isTupleTypeNode, TupleTypeNode, TypeLiteralNode, KeywordTypeNode, isArrayTypeNode, ArrayTypeNode, UnionTypeNode } from 'typescript/lib/typescript';
+import {
+	KeywordGeneratorHelper,
+	ObjectGeneratorHelper,
+	getUnionTypeGetter,
+	getArrayGenerator,
+	getBooleanGenerator,
+	getStringGenerator,
+	getNumberGenerator,
+} from './literalGenerator';
 
 /**
  * looking out for things like the following
@@ -58,27 +66,38 @@ type Generator = {
  * get to a type declaration
  * map type declaration into generators
  */
-function getUnionType(declarationSpec: TypeDeclarationSpec, pathString: string): Generator | undefined {
+function getUnionTypeGenerator(declarationSpec: TypeDeclarationSpec, pathString: string): Generator | undefined {
 	const identifier = declarationSpec.identifier;
 	const node = declarationSpec.declaration
 	if (isUnionTypeNode(node)) {
-		let unionGeneratorLiterals: ObjectGeneratorHelper[];
-		node.forEachChild((unionLiteral: Node) => {
-			if (isLiteralTypeNode(unionLiteral)) {
-				const literals = getStringsOrNumbers(node)
-				unionGeneratorLiterals = literals;
-			} else if (isTypeLiteralNode(unionLiteral)) {
-				const literals = getUnionedObjects(node, pathString)
-				unionGeneratorLiterals = literals;
-			} else if (isTupleTypeNode(unionLiteral)) {
-				const literals = getUnionedArrays(node, pathString);
-				unionGeneratorLiterals = literals;
-			}
-		});
-		return {
-			identifier,
-			get: getUnionTypeGetter(unionGeneratorLiterals),
-		};
+		const generator = getUnionType(node, pathString);
+		if (generator) {
+			return {
+				identifier,
+				get: generator,
+			};
+		}
+	}
+	return;
+}
+
+function getUnionType(node: UnionTypeNode, pathString): ObjectGeneratorHelper | undefined {
+	let unionGeneratorLiterals: ObjectGeneratorHelper[];
+	node.forEachChild((unionLiteral: Node) => {
+		if (isLiteralTypeNode(unionLiteral)) {
+			const literals = getStringsOrNumbers(node)
+			unionGeneratorLiterals = literals;
+		} else if (isTypeLiteralNode(unionLiteral)) {
+			const literals = getUnionedObjects(node, pathString)
+			unionGeneratorLiterals = literals;
+		} else if (isTupleTypeNode(unionLiteral)) {
+			const literals = getUnionedArrays(node, pathString);
+			unionGeneratorLiterals = literals;
+		}
+	});
+
+	if (unionGeneratorLiterals !== undefined) {
+		return getUnionTypeGetter(unionGeneratorLiterals);
 	}
 	return;
 }
@@ -115,7 +134,6 @@ function getArrayLiteral(node: Node, path: string): ObjectGeneratorHelper | unde
 	return result;
 }
 
-type ObjectGeneratorHelper = () => any;
 function getUnionedObjects(node: Node, pathString: string): ObjectGeneratorHelper[] {
 	let literals: any[] = [];
 	node.forEachChild((child: TypeLiteralNode) => {
@@ -160,14 +178,23 @@ function getObjectSubLiteral(node: PropertySignature, pathString: string): Objec
 			inProgressKey = child.text;
 		} else {
 			if (inProgressKey !== undefined) {
-				const literal = getTypeLiteralType(child, pathString + inProgressKey);
-				if (literal !== undefined) {
-					o = () => {
-						return {
-							[inProgressKey]:  literal(),
+				if (isUnionTypeNode(child)) {
+					const generator = getUnionType(child, pathString + inProgressKey);
+					if (generator !== undefined) {
+						o = () => ({
+							[inProgressKey]: generator(),
+						});
+					}
+				} else if (isLiteralTypeNode(child) || isTupleTypeNode(child)) {
+					const literal = getTypeLiteralType(child, pathString + inProgressKey);
+					if (literal !== undefined) {
+						o = () => {
+							return {
+								[inProgressKey]:  literal(),
+							};
 						};
-					};
-				} else if (!isLiteralTypeNode(child)) {
+					}
+				} else {
 					// sub type is a key word
 					const generator = getKeywordGeneratorHelper(child, pathString + inProgressKey)
 					if (generator !== undefined) {
@@ -182,7 +209,6 @@ function getObjectSubLiteral(node: PropertySignature, pathString: string): Objec
 	return o;
 }
 
-type KeywordGeneratorHelper = () => any;
 function getKeywordGeneratorHelper(node: KeywordTypeNode, pathString: string): KeywordGeneratorHelper | undefined {
 	if (node.kind === SyntaxKind.StringKeyword) {
 		return getStringGenerator(pathString);
@@ -210,6 +236,14 @@ function getKeywordGeneratorHelper(node: KeywordTypeNode, pathString: string): K
 
 	if (node.kind === SyntaxKind.AnyKeyword) {
 		return () => undefined;
+	}
+
+	if (isTypeLiteralNode(node)) {
+		// is an object literal probably
+		const literal = getTypeLiteralType(node, pathString);
+		if (literal !== undefined) {
+			return literal;
+		}
 	}
 
 	return;
@@ -267,6 +301,31 @@ function getOptionalIdentifierAndTypeDeclaration(node: Node): TypeDeclarationSpe
 	return;
 }
 
+function getArrayType(node: ArrayTypeNode, pathString: string): ObjectGeneratorHelper | undefined {
+	let a: ObjectGeneratorHelper;
+	node.forEachChild((child: KeywordTypeNode | LiteralTypeNode) => {
+		if (isUnionTypeNode(child)) {
+			const literal = getUnionType(child, pathString);
+			if (literal !== undefined) {
+				a = getArrayGenerator(literal);
+			}
+		} else if (isLiteralTypeNode(child)) {
+			const literalGenerator = getTypeLiteralType(child, pathString);
+			if (literalGenerator !== undefined) {
+				a = getArrayGenerator(literalGenerator);
+			}
+		} else {
+			// sub type is a key word
+			const keywordGenerator = getKeywordGeneratorHelper(child, pathString)
+			if (keywordGenerator !== undefined) {
+				a = getArrayGenerator(keywordGenerator);
+			}
+		}
+
+	});
+	return a;
+}
+
 function getTypeLiteralType(node: Node, pathString: string): ObjectGeneratorHelper | undefined {
 	if (isTypeLiteralNode(node)) {
 		const o = getObjectLiteral(node, pathString);
@@ -277,6 +336,13 @@ function getTypeLiteralType(node: Node, pathString: string): ObjectGeneratorHelp
 
 	if (isTupleTypeNode(node)) {
 		const a = getArrayLiteral(node, pathString);
+		if (a !== undefined) {
+			return a;
+		}
+	}
+
+	if (isArrayTypeNode(node)) {
+		const a = getArrayType(node, pathString);
 		if (a !== undefined) {
 			return a;
 		}
@@ -306,7 +372,7 @@ function getTypeLiteralTypeFromDeclarationSpec(declarationSpec: TypeDeclarationS
 }
 
 function getTypeDeclaration(declarationSpec: TypeDeclarationSpec): Generator | undefined {
-	const typeGetters = [getUnionType, getTypeLiteralTypeFromDeclarationSpec];
+	const typeGetters = [getUnionTypeGenerator, getTypeLiteralTypeFromDeclarationSpec];
 	let typeIndex = 0;
 	let foundType;
 	while (foundType === undefined && typeIndex < typeGetters.length) {
@@ -314,14 +380,6 @@ function getTypeDeclaration(declarationSpec: TypeDeclarationSpec): Generator | u
 		typeIndex += 1;
 	}
 	return foundType;
-}
-
-function getUnionTypeGetter(literals: ObjectGeneratorHelper[]): () => any {
-	let totalCalls = -1;
-	return () => {
-		totalCalls += 1;
-		return literals[totalCalls % literals.length]();
-	};
 }
 
 export function findTypeDeclarations(node: Node): Generator[] {
