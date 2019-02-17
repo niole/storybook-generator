@@ -1,7 +1,7 @@
 import * as test from 'tape';
 import { createSourceFile, ScriptTarget, SourceFile } from 'typescript/lib/typescript';
 
-import { findTypeDeclarations } from '../parser';
+import Parser from '../parser';
 import { getStringGenerator, getNumberGenerator, getBooleanGenerator } from '../literalGenerator';
 
 test('should be able to parse single depth type declaration objects', t => {
@@ -13,7 +13,7 @@ test('should be able to parse single depth type declaration objects', t => {
         };
     `;
     const out = createSourceFile('x.ts', typeDeclaration, ScriptTarget.ES5);
-    const generators = findTypeDeclarations(out);
+    const generators = new Parser().findTypeDeclarations(out);
 
     const xyzGenerator = getStringGenerator('DeclarationNamexyz');
     const ZGenerator = getBooleanGenerator();
@@ -42,7 +42,7 @@ test('should be able to parse single depth type declaration objects', t => {
          };
      `;
      const out = createSourceFile('x.ts', typeDeclaration, ScriptTarget.ES5);
-     const generators = findTypeDeclarations(out);
+     const generators = new Parser().findTypeDeclarations(out);
  
      const xyzGenerator = {
         TTT: getStringGenerator('DeclarationNamexyzTTT')(),

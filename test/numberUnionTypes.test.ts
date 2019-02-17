@@ -1,14 +1,14 @@
 import * as test from 'tape';
 import { createSourceFile, ScriptTarget, SourceFile } from 'typescript/lib/typescript';
 
-import { findTypeDeclarations } from '../parser';
+import Parser from '../parser';
 
 test('integer union test', t => {
     t.plan(5);
 
     const stringUnion = `type Name = 1 | 2 | 3;`;
     const sourceFile: SourceFile = createSourceFile('x.ts', stringUnion, ScriptTarget.ES5);
-    const decs = findTypeDeclarations(sourceFile);
+    const decs = new Parser().findTypeDeclarations(sourceFile);
 
     t.equal(decs.length, 1, 'total decalarations found should be one');
 
@@ -25,7 +25,7 @@ test('float union test', t => {
 
     const stringUnion = `type Name = 1.0 | 2.0 | 3.0;`;
     const sourceFile: SourceFile = createSourceFile('x.ts', stringUnion, ScriptTarget.ES5);
-    const decs = findTypeDeclarations(sourceFile);
+    const decs = new Parser().findTypeDeclarations(sourceFile);
 
     t.equal(decs.length, 1, 'total decalarations found should be one');
 

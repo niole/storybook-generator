@@ -8,7 +8,7 @@ import {
     getNumberGenerator,
     getArrayGenerator,
 } from '../literalGenerator';
-import { findTypeDeclarations } from '../parser';
+import Parser from '../parser';
 
 /**
  * array type declarations are hard because arrays have variable length
@@ -21,7 +21,7 @@ test('array generation array length', t => {
     t.plan(6);
     const numberArrayType = `type NumberArray = number[];`;
     const source = createSourceFile('x.ts', numberArrayType, ScriptTarget.ES5);
-    const foundTypeDeclarations = findTypeDeclarations(source);
+    const foundTypeDeclarations = new Parser().findTypeDeclarations(source);
 
     t.equals(foundTypeDeclarations.length, 1);
     t.deepEquals(foundTypeDeclarations[0].get(), [], "First get should return an array of no length");
@@ -35,7 +35,7 @@ test('number array generation', t => {
     t.plan(6);
     const numberArrayType = `type NumberArray = number[];`;
     const source = createSourceFile('x.ts', numberArrayType, ScriptTarget.ES5);
-    const foundTypeDeclarations = findTypeDeclarations(source);
+    const foundTypeDeclarations = new Parser().findTypeDeclarations(source);
 
     const arrayGenerator = getArrayGenerator(getNumberGenerator('NumberArray'));
 
@@ -51,7 +51,7 @@ test('string array generation', t => {
     t.plan(6);
     const stringArrayType = `type StringArray = string[];`;
     const source = createSourceFile('x.ts', stringArrayType, ScriptTarget.ES5);
-    const foundTypeDeclarations = findTypeDeclarations(source);
+    const foundTypeDeclarations = new Parser().findTypeDeclarations(source);
 
     const arrayGenerator = getArrayGenerator(getStringGenerator('StringArray'));
 
@@ -67,7 +67,7 @@ test('boolean array generation', t => {
     t.plan(6);
     const booleanArrayType = `type BooleanArray = boolean[];`;
     const source = createSourceFile('x.ts', booleanArrayType, ScriptTarget.ES5);
-    const foundTypeDeclarations = findTypeDeclarations(source);
+    const foundTypeDeclarations = new Parser().findTypeDeclarations(source);
 
     const arrayGenerator = getArrayGenerator(getBooleanGenerator());
 
@@ -83,7 +83,7 @@ test('object array generation', t => {
     t.plan(6);
     const numberArrayType = `type Array = { num: number; bool: boolean; obj: { cats: [1,2,3]; dogs: 'lab' | 'collie' | 'shitzu' }}[];`;
     const source = createSourceFile('x.ts', numberArrayType, ScriptTarget.ES5);
-    const foundTypeDeclarations = findTypeDeclarations(source);
+    const foundTypeDeclarations = new Parser().findTypeDeclarations(source);
 
     const numGenerator = getNumberGenerator('Arraynum');
     const boolGenerator = getBooleanGenerator();
@@ -111,7 +111,7 @@ test('array of arrays generation', t => {
     t.plan(6);
     const nestedArrayType = `type Array = { num: number; bool: boolean; obj: { cats: [1,2,3]; dogs: 'lab' | 'collie' | 'shitzu' }}[][];`;
     const source = createSourceFile('x.ts', nestedArrayType, ScriptTarget.ES5);
-    const foundTypeDeclarations = findTypeDeclarations(source);
+    const foundTypeDeclarations = new Parser().findTypeDeclarations(source);
 
     const numGenerator = getNumberGenerator('Arraynum');
     const boolGenerator = getBooleanGenerator();

@@ -1,7 +1,7 @@
 import * as test from 'tape';
 import { createSourceFile, ScriptTarget, SourceFile } from 'typescript/lib/typescript';
 
-import { findTypeDeclarations } from '../parser';
+import Parser from '../parser';
 
 test('number arrays union test', t => {
     t.plan(4);
@@ -13,7 +13,7 @@ test('number arrays union test', t => {
     const union = 'type W = [ 1, 2, 3] | [2, 3, 4 ]';
 
     const sourceFile: SourceFile = createSourceFile('x.ts', union, ScriptTarget.ES5);
-    const decs = findTypeDeclarations(sourceFile);
+    const decs = new Parser().findTypeDeclarations(sourceFile);
 
     t.equal(decs.length, 1, 'total decalarations found should be one');
 
@@ -33,7 +33,7 @@ test('string arrays union test', t => {
     const union = 'type W = [ "1", "2", "3"] | ["2", "3", "4" ]';
 
     const sourceFile: SourceFile = createSourceFile('x.ts', union, ScriptTarget.ES5);
-    const decs = findTypeDeclarations(sourceFile);
+    const decs = new Parser().findTypeDeclarations(sourceFile);
 
     t.equal(decs.length, 1, 'total decalarations found should be one');
 
