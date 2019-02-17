@@ -134,3 +134,39 @@ test('array of arrays generation', t => {
     t.deepEquals(foundTypeDeclarations[0].get(), arrayGenerator(), "Fourth should be correct");
     t.deepEquals(foundTypeDeclarations[0].get(), arrayGenerator(), "Fifth should be correct");
 });
+
+test('array with type references', t => {
+    t.plan(5);
+    const arrayWithTypeReferences = `
+        type Cat = 'tabby' | 'calico' | 'occa';
+        interface Entry {
+            elm: number;
+            cat: Cat;
+            nested: Nested;
+        }
+        type Nested = {
+            bird: string;
+        };
+        type TypeREfArray = Entry[];
+    `;
+    const source = createSourceFile('x.ts', arrayWithTypeReferences, ScriptTarget.ES5);
+    const parser = new Parser();
+    const typeDeclarations = parser.findTypeDeclarations(source);
+
+    const catGenerator = getUnionTypeGetter([() => 'tabby', () => 'calico', () => 'occa']);
+    const elmGen = getNumberGenerator('Entryelm');
+    const nestedGen = getStringGenerator('Nestedbird');
+    const refArrayGen = getArrayGenerator(() => ({
+        elm: elmGen(),
+        cat: catGenerator(),
+        nested: {
+            bird: nestedGen(),
+        }
+    }));
+
+    t.equals(typeDeclarations.length, 4, "Should find 4 declarations");
+    t.deepEquals(parser.typeMap.TypeREfArray(), refArrayGen(), "1");
+    t.deepEquals(parser.typeMap.TypeREfArray(), refArrayGen(), "2");
+    t.deepEquals(parser.typeMap.TypeREfArray(), refArrayGen(), "3");
+    t.deepEquals(parser.typeMap.TypeREfArray(), refArrayGen(), "4");
+});

@@ -20,6 +20,8 @@ import {
 	ArrayTypeNode,
 	UnionTypeNode,
 	isTypeReferenceNode,
+	isInterfaceDeclaration,
+	TypeReferenceNode,
 } from 'typescript/lib/typescript';
 import {
 	KeywordGeneratorHelper,
@@ -186,7 +188,20 @@ export default class Parser {
 				inProgressKey = child.text;
 			} else {
 				if (inProgressKey !== undefined) {
-					if (isUnionTypeNode(child)) {
+					if (isTypeReferenceNode(child)) {
+						child.forEachChild((refNode: Identifier) => {
+							o = () => {
+								const reference = refNode.text
+								const getter = this.typeMap[reference];
+								if (getter !== undefined) {
+									return {
+										[inProgressKey]: getter(),
+									};
+								}
+								return {};
+							};
+						});
+					} else if (isUnionTypeNode(child)) {
 						const generator = this.getUnionType(child, pathString + inProgressKey);
 						if (generator !== undefined) {
 							o = () => ({
@@ -284,8 +299,27 @@ export default class Parser {
 		return literals
 	}
 
-	getOptionalIdentifierAndTypeDeclaration(node: Node): TypeDeclarationSpec | undefined {
-		// TODO expand to work for interface, enum
+	getOptionalInterfaceTypeDeclaration = (node: Node): TypeDeclarationSpec | undefined => {
+		if (isInterfaceDeclaration(node)) {
+			let identifier;
+			let declaration;
+			node.forEachChild((child: Node) => {
+				if (isIdentifier(child)) {
+					identifier = child.text;
+					declaration = node;
+				}
+			});
+			if (declaration !== undefined) {
+				return {
+					identifier,
+					declaration: node,
+				};
+			}
+		}
+		return;
+	}
+
+	getOptionalIdentifierAndTypeDeclaration = (node: Node): TypeDeclarationSpec | undefined => {
 		let identifier: string | undefined = undefined;
 		let declaration: Node | undefined = undefined;
 		node.forEachChild((child: Node) => {
@@ -297,7 +331,7 @@ export default class Parser {
 			}
 		});
 
-		if (declaration) {
+		if (declaration !== undefined) {
 			return {
 				declaration,
 				identifier,
@@ -309,7 +343,18 @@ export default class Parser {
 	getArrayType(node: ArrayTypeNode, pathString: string): ObjectGeneratorHelper | undefined {
 		let a: ObjectGeneratorHelper;
 		node.forEachChild((child: KeywordTypeNode | LiteralTypeNode) => {
-			if (isUnionTypeNode(child)) {
+			if (isTypeReferenceNode(child)) {
+				child.forEachChild((refNode: Identifier) => {
+					a = getArrayGenerator(() => {
+						const id = refNode.text;
+						const getter = this.typeMap[id];
+						if (getter !== undefined) {
+							return getter();
+						}
+						return;
+					});
+				});
+			} else if (isUnionTypeNode(child)) {
 				const literal = this.getUnionType(child, pathString);
 				if (literal !== undefined) {
 					a = getArrayGenerator(literal);
@@ -376,8 +421,43 @@ export default class Parser {
 		return;
 	}
 
+	getInterface = (declarationSpec: TypeDeclarationSpec, pathString: string): Generator | undefined => {
+		const node = declarationSpec.declaration
+		const identifier = declarationSpec.identifier || '';
+		if (isInterfaceDeclaration(node)) {
+			let helpers: ObjectGeneratorHelper[];
+			node.forEachChild((literalChild: Node) => {
+				if (isPropertySignature(literalChild)) {
+					const literal = this.getObjectSubLiteral(literalChild, pathString);
+					if (literal !== undefined) {
+						if (helpers === undefined) {
+							helpers = [];
+						}
+						helpers.push(literal);
+					}
+				}
+			});
+			if (helpers !== undefined) {
+				return {
+					identifier,
+					get: () => {
+						return helpers.reduce((acc: object, nextHelper: ObjectGeneratorHelper) => ({
+							...acc,
+							...nextHelper()
+						}), {});
+					},
+				};
+			}
+		}
+		return;
+	}
+
 	getTypeDeclaration(declarationSpec: TypeDeclarationSpec): Generator | undefined {
-		const typeGetters = [this.getUnionTypeGenerator, this.getTypeLiteralTypeFromDeclarationSpec];
+		const typeGetters = [
+			this.getInterface,
+			this.getUnionTypeGenerator,
+			this.getTypeLiteralTypeFromDeclarationSpec,
+		];
 		let typeIndex = 0;
 		let foundType;
 		while (foundType === undefined && typeIndex < typeGetters.length) {
@@ -387,11 +467,25 @@ export default class Parser {
 		return foundType;
 	}
 
+	getTypeDeclarationSpec(node: Node): TypeDeclarationSpec | undefined {
+		const declarationSpecGetters = [
+			this.getOptionalInterfaceTypeDeclaration,
+			this.getOptionalIdentifierAndTypeDeclaration,
+		];
+		let typeIndex = 0;
+		let foundType;
+		while (foundType === undefined && typeIndex < declarationSpecGetters.length) {
+			foundType = declarationSpecGetters[typeIndex](node);
+			typeIndex += 1;
+		}
+		return foundType;
+	}
+
 	findTypeDeclarations(node: Node): Generator[] {
 		let generators: Generator[] = [];
 		node.forEachChild((child: Node) => {
 			if (node.kind !== SyntaxKind.EndOfFileToken) {
-				const typeDecSpec = this.getOptionalIdentifierAndTypeDeclaration(child);
+				const typeDecSpec = this.getTypeDeclarationSpec(child);
 				if (typeDecSpec) {
 					const generator = this.getTypeDeclaration(typeDecSpec);
 					if (generator) {
