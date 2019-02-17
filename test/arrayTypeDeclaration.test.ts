@@ -106,3 +106,31 @@ test('object array generation', t => {
     t.deepEquals(foundTypeDeclarations[0].get(), arrayGenerator(), "Fourth should be correct");
     t.deepEquals(foundTypeDeclarations[0].get(), arrayGenerator(), "Fifth should be correct");
 });
+
+test('array of arrays generation', t => {
+    t.plan(6);
+    const nestedArrayType = `type Array = { num: number; bool: boolean; obj: { cats: [1,2,3]; dogs: 'lab' | 'collie' | 'shitzu' }}[][];`;
+    const source = createSourceFile('x.ts', nestedArrayType, ScriptTarget.ES5);
+    const foundTypeDeclarations = findTypeDeclarations(source);
+
+    const numGenerator = getNumberGenerator('Arraynum');
+    const boolGenerator = getBooleanGenerator();
+    const dogsGetter = getUnionTypeGetter([() => 'lab', () => 'collie', () => 'shitzu']);
+    const internalObjectGenerator = () => ({
+        cats: [1,2,3],
+        dogs: dogsGetter(),
+    });
+    const objectGenerator = () => ({
+        num: numGenerator(),
+        bool: boolGenerator(),
+        obj: internalObjectGenerator(),
+    });
+    const arrayGenerator = getArrayGenerator(getArrayGenerator(objectGenerator));
+
+    t.equals(foundTypeDeclarations.length, 1, "Should find 1 type declaration");
+    t.deepEquals(foundTypeDeclarations[0].get(), arrayGenerator(), "First generation should be correct");
+    t.deepEquals(foundTypeDeclarations[0].get(), arrayGenerator(), "Second should be correct");
+    t.deepEquals(foundTypeDeclarations[0].get(), arrayGenerator(), "Third should be correct");
+    t.deepEquals(foundTypeDeclarations[0].get(), arrayGenerator(), "Fourth should be correct");
+    t.deepEquals(foundTypeDeclarations[0].get(), arrayGenerator(), "Fifth should be correct");
+});

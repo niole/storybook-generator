@@ -238,6 +238,10 @@ function getKeywordGeneratorHelper(node: KeywordTypeNode, pathString: string): K
 		return () => undefined;
 	}
 
+	if (isArrayTypeNode(node)) {
+		return getArrayType(node, pathString);
+	}
+
 	if (isTypeLiteralNode(node)) {
 		// is an object literal probably
 		const literal = getTypeLiteralType(node, pathString);
