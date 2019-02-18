@@ -48,3 +48,14 @@ export function getUnionTypeGetter(literals: ObjectGeneratorHelper[]): () => any
 		return literals[totalCalls % literals.length]();
 	};
 }
+
+export function getOptionalGetter(getter: ObjectGeneratorHelper | KeywordGeneratorHelper, defaultValue?: any): ObjectGeneratorHelper {
+	let totalCalls = -1;
+	return () => {
+        totalCalls += 1;
+        if (totalCalls % 2 === 0) {
+            return defaultValue;
+        }
+		return getter();
+	};
+}

@@ -22,8 +22,10 @@ import {
 	isTypeReferenceNode,
 	isInterfaceDeclaration,
 	TypeReferenceNode,
+	QuestionToken,
 } from 'typescript/lib/typescript';
 import {
+	getOptionalGetter,
 	KeywordGeneratorHelper,
 	ObjectGeneratorHelper,
 	getUnionTypeGetter,
@@ -34,6 +36,13 @@ import {
 } from './literalGenerator';
 
 type TypeDeclarationSpec = { identifier?: string; declaration: Node };
+
+function buildOptionalGetter(isOptional: boolean, getter: ObjectGeneratorHelper | KeywordGeneratorHelper, defaultValue?: any): ObjectGeneratorHelper {
+	if (isOptional) {
+		return getOptionalGetter(getter, defaultValue);
+	}
+	return getter;
+}
 
 function visitLiteralTypeNodeChildren(node: LiteralTypeNode, cb: (child: LiteralExpression) => void): void {
 	if (isLiteralTypeNode(node)) {
@@ -183,14 +192,17 @@ export default class Parser {
 	getObjectSubLiteral(node: PropertySignature, pathString: string): ObjectGeneratorHelper {
 		let o: ObjectGeneratorHelper;
 		let inProgressKey;
-		node.forEachChild((child: Identifier | LiteralTypeNode | KeywordTypeNode) => {
-			if (isIdentifier(child)) {
+		let isOptional: boolean = false;
+		node.forEachChild((child: Identifier | LiteralTypeNode | KeywordTypeNode | QuestionToken) => {
+			if (child.kind === SyntaxKind.QuestionToken) {
+				isOptional = true;
+			} else if (isIdentifier(child)) {
 				inProgressKey = child.text;
 			} else {
 				if (inProgressKey !== undefined) {
 					if (isTypeReferenceNode(child)) {
 						child.forEachChild((refNode: Identifier) => {
-							o = () => {
+							o = buildOptionalGetter(isOptional, () => {
 								const reference = refNode.text
 								const getter = this.typeMap[reference];
 								if (getter !== undefined) {
@@ -199,31 +211,31 @@ export default class Parser {
 									};
 								}
 								return {};
-							};
+							}, {});
 						});
 					} else if (isUnionTypeNode(child)) {
 						const generator = this.getUnionType(child, pathString + inProgressKey);
 						if (generator !== undefined) {
-							o = () => ({
+							o = buildOptionalGetter(isOptional, () => ({
 								[inProgressKey]: generator(),
-							});
+							}), {});
 						}
 					} else if (isLiteralTypeNode(child) || isTupleTypeNode(child)) {
 						const literal = this.getTypeLiteralType(child, pathString + inProgressKey);
 						if (literal !== undefined) {
-							o = () => {
+							o = buildOptionalGetter(isOptional, () => {
 								return {
 									[inProgressKey]:  literal(),
 								};
-							};
+							}, {});
 						}
 					} else {
 						// sub type is a key word
 						const generator = this.getKeywordGeneratorHelper(child, pathString + inProgressKey)
 						if (generator !== undefined) {
-							o = () => ({
+							o = buildOptionalGetter(isOptional, () => ({
 								[inProgressKey]: generator(),
-							});
+							}), {});
 						}
 					}
 				}
