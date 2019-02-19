@@ -84,3 +84,16 @@ test('should be able to get default react export that is not immediately assigne
      t.deepEquals(parser.defaultReactExport!.props(), propGenerator(), "Should be equal");
      t.deepEquals(parser.defaultReactExport!.props(), propGenerator(), "Should be equal");
  });
+
+ test('should be able to get react function elements non default export', t => {
+     t.plan(1);
+     const fileContents = `
+         interface Props {
+             name: string;
+             date: number;
+         }
+         export const Component: React.SFC<Props> = props => <div {...props} />;
+     `;
+     const parser = Parser.build('x.tsx', fileContents);
+     t.equals(parser.reactExports.length, 1, "Should find react component");
+ });
