@@ -1,4 +1,5 @@
 import {
+	createSourceFile,
 	PropertySignature,
 	Node,
 	SyntaxKind,
@@ -21,8 +22,25 @@ import {
 	UnionTypeNode,
 	isTypeReferenceNode,
 	isInterfaceDeclaration,
-	TypeReferenceNode,
 	QuestionToken,
+	isClassDeclaration,
+	isHeritageClause,
+	HeritageClause,
+	isExpressionWithTypeArguments,
+	ExpressionWithTypeArguments,
+	ScriptTarget,
+	isExportAssignment,
+	isExportDeclaration,
+	isExpressionStatement,
+	isExportSpecifier,
+	isNamedExports,
+	isImportOrExportSpecifier,
+	isNamespaceExportDeclaration,
+	NodeFlags,
+	isVariableDeclaration,
+	isQualifiedName,
+	isVariableStatement,
+	isVariableDeclarationList,
 } from 'typescript/lib/typescript';
 import {
 	getOptionalGetter,
@@ -36,6 +54,18 @@ import {
 } from './literalGenerator';
 
 type TypeDeclarationSpec = { identifier?: string; declaration: Node };
+
+function getTypeReferenceId(node: Node): string | undefined {
+	let id: string;
+	if (isTypeReferenceNode(node)) {
+		node.forEachChild((child: Node) => {
+			if (isIdentifier(child)) {
+				id = child.text;
+			}
+		});
+	}
+	return id;
+}
 
 function buildOptionalGetter(isOptional: boolean, getter: ObjectGeneratorHelper | KeywordGeneratorHelper, defaultValue?: any): ObjectGeneratorHelper {
 	if (isOptional) {
@@ -55,16 +85,48 @@ type Generator = {
 	get: () => any;
 };
 
+type Export = {
+	name: string;
+	isDefault: boolean;
+};
+
+type ReactExport = {
+	name?: string;
+	isDefault: boolean;
+	props: ObjectGeneratorHelper;
+};
+
 /**
  * we have independent types and then types that are dependent on other types
  * we have incrementally built generators
  */
 
 export default class Parser {
-	 typeMap: { [typeName: string]: ObjectGeneratorHelper | KeywordGeneratorHelper }
-	 constructor() {
-		 this.typeMap = {};
-	 }
+	typeMap: { [typeName: string]: ObjectGeneratorHelper | KeywordGeneratorHelper } = {};
+
+	defaultReactExport?: ReactExport;
+
+	reactExports: ReactExport[] = [];
+
+	exports: Export[] = [];
+
+	static build(fileName: string, fileContents: string, scriptTarget?: ScriptTarget): Parser {
+		const out = createSourceFile(fileName, fileContents, scriptTarget || ScriptTarget.ES5);
+		const parser = new Parser();
+		parser.findTypeDeclarations(out);
+		parser.exports.forEach((exp: Export) => {
+			if (exp.isDefault) {
+				const defaultReactExport = parser.reactExports.find((reactExport: ReactExport) => reactExport.name === exp.name);
+				if (defaultReactExport !== undefined) {
+					parser.defaultReactExport = {
+						...defaultReactExport,
+						isDefault: true
+					};
+				}
+			}
+		});
+		return parser;
+	}
 
 	/**
 	 * strategy
@@ -90,19 +152,18 @@ export default class Parser {
 		let unionGeneratorLiterals: ObjectGeneratorHelper[];
 		node.forEachChild((unionLiteral: Node) => {
 			if (isTypeReferenceNode(unionLiteral)) {
-				// create a type reference map?
-				unionLiteral.forEachChild((id: Identifier) => {
+				const typeName = getTypeReferenceId(unionLiteral);
+				if (typeName !== undefined) {
 					if (!unionGeneratorLiterals) {
 						unionGeneratorLiterals = [];
 					}
-					const typeName = id.text;
 					unionGeneratorLiterals.push(() => {
 						if (this.typeMap[typeName]) {
 							return this.typeMap[typeName]();
 						}
 						return;
 					});
-				});
+				}
 			} else if (isLiteralTypeNode(unionLiteral)) {
 				const literals = this.getStringsOrNumbers(node)
 				unionGeneratorLiterals = literals;
@@ -201,9 +262,9 @@ export default class Parser {
 			} else {
 				if (inProgressKey !== undefined) {
 					if (isTypeReferenceNode(child)) {
-						child.forEachChild((refNode: Identifier) => {
+						const reference = getTypeReferenceId(child);
+						if (reference !== undefined) {
 							o = buildOptionalGetter(isOptional, () => {
-								const reference = refNode.text
 								const getter = this.typeMap[reference];
 								if (getter !== undefined) {
 									return {
@@ -212,7 +273,7 @@ export default class Parser {
 								}
 								return {};
 							}, {});
-						});
+						}
 					} else if (isUnionTypeNode(child)) {
 						const generator = this.getUnionType(child, pathString + inProgressKey);
 						if (generator !== undefined) {
@@ -356,16 +417,16 @@ export default class Parser {
 		let a: ObjectGeneratorHelper;
 		node.forEachChild((child: KeywordTypeNode | LiteralTypeNode) => {
 			if (isTypeReferenceNode(child)) {
-				child.forEachChild((refNode: Identifier) => {
+				const id = getTypeReferenceId(child);
+				if (id !== undefined) {
 					a = getArrayGenerator(() => {
-						const id = refNode.text;
 						const getter = this.typeMap[id];
 						if (getter !== undefined) {
 							return getter();
 						}
 						return;
 					});
-				});
+				}
 			} else if (isUnionTypeNode(child)) {
 				const literal = this.getUnionType(child, pathString);
 				if (literal !== undefined) {
@@ -464,6 +525,82 @@ export default class Parser {
 		return;
 	}
 
+	parseReactComponentDeclaration(node: ExpressionWithTypeArguments, pathString: string): ObjectGeneratorHelper | undefined {
+		let propGenerator: ObjectGeneratorHelper;
+		node.forEachChild((child: Node) => {
+			if (isTypeReferenceNode(child)) {
+				const identifier = getTypeReferenceId(child);
+				if (identifier !== undefined) {
+					propGenerator = () => {
+						const getter = this.typeMap[identifier];
+						if (getter !== undefined) {
+							return getter();
+						}
+					};
+				}
+			} else if (isTypeLiteralNode(child)) {
+				const literal = this.getTypeLiteralType(child, pathString);
+				if (literal !== undefined) {
+					propGenerator = literal;
+				}
+			}
+		});
+
+		return propGenerator;
+	}
+
+	getPropGenerator(node: HeritageClause, pathString: string): ObjectGeneratorHelper | undefined {
+		let propGenerator: ObjectGeneratorHelper;
+		node.forEachChild((child: Node) => {
+			if (propGenerator === undefined) {
+				if (isExpressionWithTypeArguments(child)) {
+					const component = this.parseReactComponentDeclaration(child, pathString);
+					if (component !== undefined) {
+						propGenerator = component;
+					}
+				}
+			}
+		});
+		return propGenerator;
+	}
+
+	isDefaultExport(node: Node): boolean {
+		let isExport: boolean = false;
+		let isDefault: boolean = false;
+		node.forEachChild((child: Node) => {
+			if (child.kind === SyntaxKind.DefaultKeyword) {
+				isDefault = true;
+			}
+			if (child.kind === SyntaxKind.ExportKeyword) {
+				isExport = true;
+			}
+		});
+		return isExport && isDefault;
+	}
+
+	getClass = (declarationSpec: TypeDeclarationSpec, pathString: string): ReactExport | undefined => {
+		const node = declarationSpec.declaration;
+		const identifier = declarationSpec.identifier;
+		if (isClassDeclaration(node)) {
+			let propGenerator: ObjectGeneratorHelper;
+			node.forEachChild((child: Node) => {
+				if (isHeritageClause(child)) {
+					// get type info for extends clause
+					// if doesn't have a heritage clause definitely not a react class component
+					propGenerator = this.getPropGenerator(child, pathString);
+				}
+			});
+			if (propGenerator !== undefined) {
+				return {
+					isDefault: this.isDefaultExport(node),
+					name: identifier,
+					props: propGenerator,
+				};
+			}
+		}
+		return;
+	}
+
 	getTypeDeclaration(declarationSpec: TypeDeclarationSpec): Generator | undefined {
 		const typeGetters = [
 			this.getInterface,
@@ -479,8 +616,56 @@ export default class Parser {
 		return foundType;
 	}
 
+	getOptionalClassDeclaration = (node: Node): TypeDeclarationSpec | undefined => {
+		if (isClassDeclaration(node)) {
+			let identifier: string;
+			node.forEachChild((child: Node) => {
+				if (isIdentifier(child)) {
+					identifier = child.text
+				}
+			});
+			if (identifier !== undefined) {
+				return {
+					identifier,
+					declaration: node,
+				};
+			}
+		}
+		return;
+	}
+
+	getOptionalStatelessComponentDeclaration = (node: Node): TypeDeclarationSpec | undefined => {
+		if (isVariableStatement(node)) {
+			let elementName: string;
+			let propName: string;
+			node.forEachChild((child: Node) => {
+				if (isVariableDeclarationList(child)) {
+					child.forEachChild((decList: Node) => {
+						if (isVariableDeclaration(decList)) {
+							decList.forEachChild((dec: Node) => {
+								if (isIdentifier(dec)) {
+									elementName = dec.text;
+								}
+							});
+						}
+					});
+				}
+			});
+			if (elementName !== undefined) {
+				return {
+					declaration: node,
+					identifier: elementName,
+				};
+			}
+
+		}
+		return;
+	}
+
 	getTypeDeclarationSpec(node: Node): TypeDeclarationSpec | undefined {
 		const declarationSpecGetters = [
+			this.getOptionalStatelessComponentDeclaration,
+			this.getOptionalClassDeclaration,
 			this.getOptionalInterfaceTypeDeclaration,
 			this.getOptionalIdentifierAndTypeDeclaration,
 		];
@@ -493,25 +678,132 @@ export default class Parser {
 		return foundType;
 	}
 
-	findTypeDeclarations(node: Node): Generator[] {
-		let generators: Generator[] = [];
-		node.forEachChild((child: Node) => {
-			if (node.kind !== SyntaxKind.EndOfFileToken) {
-				const typeDecSpec = this.getTypeDeclarationSpec(child);
-				if (typeDecSpec) {
-					const generator = this.getTypeDeclaration(typeDecSpec);
-					if (generator) {
-						if (generator.identifier) {
-							this.typeMap[generator.identifier] = generator.get;
+	getElement = (declarationSpec: TypeDeclarationSpec, pathString: string): ReactExport | undefined => {
+		const node = declarationSpec.declaration;
+		const name = declarationSpec.identifier;
+
+		if (isVariableStatement(node)) {
+			let elementName: string;
+			let propName: string;
+			node.forEachChild((child: Node) => {
+				if (isVariableDeclarationList(child)) {
+					child.forEachChild((decList: Node) => {
+						if (isVariableDeclaration(decList)) {
+							decList.forEachChild((dec: Node) => {
+								if (isTypeReferenceNode(dec)) {
+									dec.forEachChild((typeDeclaration: Node) => {
+										if (isTypeReferenceNode(typeDeclaration)) {
+											typeDeclaration.forEachChild((a: Node) => {
+												if (isIdentifier(a)) {
+													propName = a.text;
+												}
+											});
+										}
+									});
+								}
+							});
 						}
-						generators.push(generator);
-					}
-				} else if (child.kind !== SyntaxKind.EndOfFileToken) {
-					const possibleGenerators = this.findTypeDeclarations(child);
-					generators = generators.concat(possibleGenerators);
+					});
 				}
+			});
+			if (propName !== undefined) {
+				return {
+					isDefault: false,
+					name,
+					props: () => {
+						const getter = this.typeMap[propName];
+						if (getter !== undefined) {
+							return getter();
+						}
+					},
+				};
+			}
+		}
+		return;
+	}
+
+	getReactComponent(declarationSpec: TypeDeclarationSpec): ReactExport | undefined {
+		const typeGetters = [this.getClass, this.getElement];
+		let typeIndex = 0;
+		let foundType;
+		while (foundType === undefined && typeIndex < typeGetters.length) {
+			foundType = typeGetters[typeIndex](declarationSpec, declarationSpec.identifier);
+			typeIndex += 1;
+		}
+		return foundType;
+	}
+
+	getExport(node: Node): Export | undefined {
+		let isExport: boolean = false;
+		let isDefault: boolean = false;
+		let name: string;
+
+		node.forEachChild((child: Node) => {
+			if (isExportAssignment(child)) {
+				isExport = true;
+				child.forEachChild((exportChild: Node) => {
+					if (isIdentifier(exportChild)) {
+						name = exportChild.text;
+						isDefault = true;
+					}
+				});
+			}
+			if (child.kind === SyntaxKind.DefaultKeyword) {
+				isDefault = true;
+			}
+			if (child.kind === SyntaxKind.ExportKeyword) {
+				isExport = true;
+			}
+			if (isIdentifier(child)) {
+				name = child.text;
+			}
+			const typeRef = getTypeReferenceId(child);
+			if (typeRef !== undefined) {
+				name = typeRef;
 			}
 		});
+		if (isExport && name !== undefined) {
+			return {
+				isDefault,
+				name,
+			};
+		}
+		return;
+	}
+
+	findTypeDeclarations(node: Node): Generator[] {
+		let generators: Generator[] = [];
+		if (node.kind !== SyntaxKind.EndOfFileToken) {
+			const foundExport = this.getExport(node);
+			if (foundExport !== undefined) {
+				this.exports.push(foundExport);
+			}
+
+			const typeDecSpec = this.getTypeDeclarationSpec(node);
+			if (typeDecSpec) {
+				const generator = this.getTypeDeclaration(typeDecSpec);
+				if (generator) {
+					if (generator.identifier) {
+						this.typeMap[generator.identifier] = generator.get;
+					}
+					generators.push(generator);
+				} else {
+					const reactExport = this.getReactComponent(typeDecSpec);
+					if (!!reactExport) {
+						this.reactExports.push(reactExport);
+						if (reactExport.isDefault) {
+							this.defaultReactExport = reactExport;
+						}
+					}
+				}
+			} else {
+				node.forEachChild((child: Node) => {
+					const possibleGenerators = this.findTypeDeclarations(child);
+					generators = generators.concat(possibleGenerators);
+				});
+			}
+		}
+
 		return generators;
 	}
  }

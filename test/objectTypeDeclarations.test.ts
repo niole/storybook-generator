@@ -1,5 +1,5 @@
 import * as test from 'tape';
-import { createSourceFile, ScriptTarget, SourceFile } from 'typescript/lib/typescript';
+import { createSourceFile, ScriptTarget } from 'typescript/lib/typescript';
 
 import Parser from '../parser';
 import { getArrayGenerator, getOptionalGetter, getStringGenerator, getNumberGenerator, getBooleanGenerator } from '../literalGenerator';
