@@ -97,3 +97,15 @@ test('should be able to get default react export that is not immediately assigne
      const parser = Parser.build('x.tsx', fileContents);
      t.equals(parser.reactExports.length, 1, "Should find react component");
  });
+
+ test('should be able to get react function elements with default export inlined type', t => {
+     t.plan(1);
+     const fileContents = `
+         const Component: React.SFC<{ name: string; }> = ({ name }) => (
+             <div>{name}</div>
+         );
+         export default Component;
+     `;
+     const parser = Parser.build('x.tsx', fileContents);
+     t.equals(parser.reactExports.length, 1, "Should find react component");
+ });

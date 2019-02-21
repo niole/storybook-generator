@@ -30,15 +30,7 @@ import {
 	ExpressionWithTypeArguments,
 	ScriptTarget,
 	isExportAssignment,
-	isExportDeclaration,
-	isExpressionStatement,
-	isExportSpecifier,
-	isNamedExports,
-	isImportOrExportSpecifier,
-	isNamespaceExportDeclaration,
-	NodeFlags,
 	isVariableDeclaration,
-	isQualifiedName,
 	isVariableStatement,
 	isVariableDeclarationList,
 } from 'typescript/lib/typescript';
@@ -56,7 +48,7 @@ import {
 type TypeDeclarationSpec = { identifier?: string; declaration: Node };
 
 function getTypeReferenceId(node: Node): string | undefined {
-	let id: string;
+	let id: string | undefined = undefined;
 	if (isTypeReferenceNode(node)) {
 		node.forEachChild((child: Node) => {
 			if (isIdentifier(child)) {
@@ -67,7 +59,7 @@ function getTypeReferenceId(node: Node): string | undefined {
 	return id;
 }
 
-function buildOptionalGetter(isOptional: boolean, getter: ObjectGeneratorHelper | KeywordGeneratorHelper, defaultValue?: any): ObjectGeneratorHelper {
+function buildOptionalGetter(isOptional: boolean, getter: ObjectGeneratorHelper | KeywordGeneratorHelper, defaultValue?: any): ObjectGeneratorHelper | KeywordGeneratorHelper {
 	if (isOptional) {
 		return getOptionalGetter(getter, defaultValue);
 	}
@@ -148,8 +140,8 @@ export default class Parser {
 		return;
 	}
 
-	getUnionType(node: UnionTypeNode, pathString): ObjectGeneratorHelper | undefined {
-		let unionGeneratorLiterals: ObjectGeneratorHelper[];
+	getUnionType(node: UnionTypeNode, pathString: string): ObjectGeneratorHelper | undefined {
+		let unionGeneratorLiterals: ObjectGeneratorHelper[] | undefined = undefined;
 		node.forEachChild((unionLiteral: Node) => {
 			if (isTypeReferenceNode(unionLiteral)) {
 				const typeName = getTypeReferenceId(unionLiteral);
@@ -194,8 +186,8 @@ export default class Parser {
 	}
 
 	getArrayLiteral(node: Node, path: string): ObjectGeneratorHelper | undefined {
-		let a: ObjectGeneratorHelper[];
-		let result: ObjectGeneratorHelper;
+		let a: ObjectGeneratorHelper[] | undefined = undefined;
+		let result: ObjectGeneratorHelper | undefined = undefined;
 		if (isTupleTypeNode(node)) {
 			node.forEachChild((literalChild: LiteralTypeNode) => {
 				const literal = this.getTypeLiteralType(literalChild, path);
@@ -226,8 +218,8 @@ export default class Parser {
 	}
 
 	getObjectLiteral(node: TypeLiteralNode, pathString: string): ObjectGeneratorHelper | undefined {
-		let helpers: ObjectGeneratorHelper[];
-		let o: ObjectGeneratorHelper
+		let helpers: ObjectGeneratorHelper[] | undefined;
+		let o: ObjectGeneratorHelper | undefined;
 		node.forEachChild((literalChild: Node) => {
 			if (isPropertySignature(literalChild)) {
 				const literal = this.getObjectSubLiteral(literalChild, pathString);
@@ -251,8 +243,8 @@ export default class Parser {
 	}
 
 	getObjectSubLiteral(node: PropertySignature, pathString: string): ObjectGeneratorHelper {
-		let o: ObjectGeneratorHelper;
-		let inProgressKey;
+		let o: ObjectGeneratorHelper | undefined = undefined;
+		let inProgressKey: string | undefined = undefined;
 		let isOptional: boolean = false;
 		node.forEachChild((child: Identifier | LiteralTypeNode | KeywordTypeNode | QuestionToken) => {
 			if (child.kind === SyntaxKind.QuestionToken) {
@@ -350,7 +342,7 @@ export default class Parser {
 	}
 
 	getNumberOrString(node: LiteralTypeNode): ObjectGeneratorHelper | undefined {
-		let literal: ObjectGeneratorHelper;
+		let literal: ObjectGeneratorHelper | undefined = undefined;
 		visitLiteralTypeNodeChildren(node, (literalChild: LiteralExpression) => {
 			if (isNumericLiteral(literalChild)) {
 				literal = () => parseFloat(literalChild.text);
@@ -439,7 +431,7 @@ export default class Parser {
 				}
 			} else {
 				// sub type is a key word
-				const keywordGenerator = this.getKeywordGeneratorHelper(child, pathString)
+				const keywordGenerator = this.getKeywordGeneratorHelper(child, pathString);
 				if (keywordGenerator !== undefined) {
 					a = getArrayGenerator(keywordGenerator);
 				}
@@ -636,8 +628,8 @@ export default class Parser {
 
 	getOptionalStatelessComponentDeclaration = (node: Node): TypeDeclarationSpec | undefined => {
 		if (isVariableStatement(node)) {
-			let elementName: string;
-			let propName: string;
+			let elementName: string | undefined = undefined;
+			let propName: string | undefined = undefined;
 			node.forEachChild((child: Node) => {
 				if (isVariableDeclarationList(child)) {
 					child.forEachChild((decList: Node) => {
@@ -684,7 +676,8 @@ export default class Parser {
 
 		if (isVariableStatement(node)) {
 			let elementName: string;
-			let propName: string;
+			let propName: string = undefined;
+			let propGenerator: ObjectGeneratorHelper = undefined;
 			node.forEachChild((child: Node) => {
 				if (isVariableDeclarationList(child)) {
 					child.forEachChild((decList: Node) => {
@@ -698,6 +691,12 @@ export default class Parser {
 													propName = a.text;
 												}
 											});
+										} else if (isTypeLiteralNode(typeDeclaration)) {
+											// is some variation of an inlined type
+											const inlinedTypeGenerator = this.getObjectLiteral(typeDeclaration, pathString);
+											if (inlinedTypeGenerator !== undefined) {
+												propGenerator = inlinedTypeGenerator;
+											}
 										}
 									});
 								}
@@ -716,6 +715,12 @@ export default class Parser {
 							return getter();
 						}
 					},
+				};
+			} else if (propGenerator !== undefined) {
+				return {
+					isDefault: false,
+					name,
+					props: propGenerator,
 				};
 			}
 		}
