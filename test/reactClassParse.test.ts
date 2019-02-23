@@ -1,7 +1,7 @@
 import * as test from 'tape';
 
-import Parser from '../parser';
-import { getStringGenerator, getNumberGenerator } from '../literalGenerator';
+import Parser from '../src/parser';
+import { getStringGenerator, getNumberGenerator } from '../src/literalGenerator';
 
 test('should be able to get the react class default export', t => {
     t.plan(4);

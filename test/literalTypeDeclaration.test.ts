@@ -1,7 +1,7 @@
 import * as test from 'tape';
 import { createSourceFile, ScriptTarget, SourceFile } from 'typescript/lib/typescript';
 
-import Parser from '../parser';
+import Parser from '../src/parser';
 
 test('string literal type declaration test', t => {
     t.plan(3);

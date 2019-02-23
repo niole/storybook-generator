@@ -7,8 +7,8 @@ import {
     getStringGenerator,
     getNumberGenerator,
     getArrayGenerator,
-} from '../literalGenerator';
-import Parser from '../parser';
+} from '../src/literalGenerator';
+import Parser from '../src/parser';
 
 /**
  * array type declarations are hard because arrays have variable length

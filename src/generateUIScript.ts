@@ -1,5 +1,6 @@
+import * as path from 'path';
 import * as glob from 'glob';
-import { readFile } from 'fs';
+import { readFile, writeFile, exists, mkdirSync } from 'fs';
 import Parser from './parser';
 
 type File = {
@@ -58,10 +59,8 @@ function generateUIScript(filePattern: string): Promise<string> {
             const exports = parseExports(file);
             return generateComponentFromParsedExports(exports);
         }).filter(x => !!x).join(', ');
-        const parentRenderer = `
-            React.render(React.createElement(\'div\', {}, [${componentRenderingLogic}]));
-        `;
-        const reactImportStatement = 'import React from \'react\';';
+        const parentRenderer = `ReactDOM.render(React.createElement(\'div\', {}, [${componentRenderingLogic}]), document.getElementById(\'main\'));`;
+        const reactImportStatement = 'import React from \'react\';\nimport ReactDOM from \'react-dom\';\n';
         return `${reactImportStatement}${parentRenderer}`;
     })
     .catch((error: any) => {
@@ -72,5 +71,12 @@ function generateUIScript(filePattern: string): Promise<string> {
 
 generateUIScript('test/*.tsx')
 .then(script => {
-    console.log(script);
+    writeFile('./out/main.js', script, 'utf8', error => {
+        if (error) {
+            Promise.reject(error);
+        }
+    });
+})
+.catch((error: any) => {
+    console.error(error);
 });

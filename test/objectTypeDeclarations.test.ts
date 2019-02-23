@@ -1,8 +1,8 @@
 import * as test from 'tape';
 import { createSourceFile, ScriptTarget } from 'typescript/lib/typescript';
 
-import Parser from '../parser';
-import { getArrayGenerator, getOptionalGetter, getStringGenerator, getNumberGenerator, getBooleanGenerator } from '../literalGenerator';
+import Parser from '../src/parser';
+import { getArrayGenerator, getOptionalGetter, getStringGenerator, getNumberGenerator, getBooleanGenerator } from '../src/literalGenerator';
 
 test('should be able to parse single depth type declaration objects', t => {
     t.plan(2);

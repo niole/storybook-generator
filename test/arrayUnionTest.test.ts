@@ -1,7 +1,7 @@
 import * as test from 'tape';
 import { createSourceFile, ScriptTarget, SourceFile } from 'typescript/lib/typescript';
 
-import Parser from '../parser';
+import Parser from '../src/parser';
 
 test('number arrays union test', t => {
     t.plan(4);
