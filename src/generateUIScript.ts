@@ -3,9 +3,19 @@ import * as glob from 'glob';
 import { readFile, writeFile, exists, mkdirSync } from 'fs';
 import Parser from './parser';
 
+const typescriptExtTest = /\.tsx/;
+
+const removeTSXEXT = (filePath: string) => filePath.replace(typescriptExtTest, '');
+
 type File = {
     name: string;
     content: string;
+};
+
+type ImportSpecification = {
+    filePath: string;
+    content: string;
+    componentName: string;
 };
 
 /**
@@ -43,11 +53,24 @@ function parseExports(file: File): Parser {
     return Parser.build(file.name, file.content);
 }
 
-function generateComponentFromParsedExports(parsedExports: Parser): string | undefined {
+function generateComponentFromParsedExports(parsedExports: Parser): { renderingLogic: string; componentName: string; } | undefined {
     if (parsedExports.defaultReactExport) {
         const { name, props } = parsedExports.defaultReactExport;
         // TODO should probably be more careful with stringify
-        return `React.createElement('${name}', ${JSON.stringify(props())})`;
+        return {
+            renderingLogic: `
+                <div>
+                    <h2>${name}</h2>
+                    <div>
+                        <${name} {...${JSON.stringify(props())}} />
+                        <${name} {...${JSON.stringify(props())}} />
+                        <${name} {...${JSON.stringify(props())}} />
+                        <${name} {...${JSON.stringify(props())}} />
+                    </div>
+                </div>
+            `,
+            componentName: name,
+        };
     }
     return;
 }
@@ -55,13 +78,32 @@ function generateComponentFromParsedExports(parsedExports: Parser): string | und
 function generateUIScript(filePattern: string): Promise<string> {
     return getFileContents(filePattern)
     .then((files: File[]) => {
-        const componentRenderingLogic = files.map((file: File) => {
-            const exports = parseExports(file);
-            return generateComponentFromParsedExports(exports);
-        }).filter(x => !!x).join(', ');
-        const parentRenderer = `ReactDOM.render(React.createElement(\'div\', {}, [${componentRenderingLogic}]), document.getElementById(\'main\'));`;
-        const reactImportStatement = 'import React from \'react\';\nimport ReactDOM from \'react-dom\';\n';
-        return `${reactImportStatement}${parentRenderer}`;
+        const componentSpecs: ImportSpecification[] = files.map((file: File) => {
+            const exports: Parser = parseExports(file);
+            const componentRenderingLogic = generateComponentFromParsedExports(exports);
+            if (componentRenderingLogic) {
+                return {
+                    filePath: removeTSXEXT(file.name),
+                    content: componentRenderingLogic.renderingLogic,
+                    componentName: componentRenderingLogic.componentName,
+                };
+            }
+            return;
+        }).filter(x => !!x);
+        const { imports, renderingLogic } = componentSpecs.reduce((acc, nextSpec) => {
+            // TODO will have to come up with scheme for relative path interpolation
+            // from user bc not all files will be in my test dir lol
+            // TODO also need to come up with a way to let users provide webpack and tsconfigs
+            // for parsing and bundling their source files
+            acc.imports.push(`import ${nextSpec.componentName} from '../${nextSpec.filePath}';\n`);
+            acc.renderingLogic.push(nextSpec.content);
+            return acc;
+        }, { imports: [], renderingLogic: []});
+        const componentRenderingLogic = renderingLogic.join(', ');
+        const componentImportStatements = imports.join('');
+        const parentRenderer = `ReactDOM.render(<div>{[${componentRenderingLogic}]}</div>, document.getElementById(\'main\'));`;
+        const reactImportStatement = 'import * as React from \'react\';\nimport * as ReactDOM from \'react-dom\';\n';
+        return `${componentImportStatements}${reactImportStatement}${parentRenderer}`;
     })
     .catch((error: any) => {
         console.error(`Something went wrong while generateing the UI script. error: ${error}`);
@@ -71,7 +113,7 @@ function generateUIScript(filePattern: string): Promise<string> {
 
 generateUIScript('test/*.tsx')
 .then(script => {
-    writeFile('./out/main.js', script, 'utf8', error => {
+    writeFile('./out/main.tsx', script, 'utf8', error => {
         if (error) {
             Promise.reject(error);
         }

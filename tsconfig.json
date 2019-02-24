@@ -1,7 +1,9 @@
 {
     "compilerOptions": {
         "outDir": "dist",
-        "baseUrl": "src"
+        "baseUrl": "src",
+        "rootDirs": ["src"],
+        "jsx": "react"
     },
     "exclude": ["test"]
 }
